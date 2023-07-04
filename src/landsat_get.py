@@ -153,7 +153,6 @@ class Landsat:
         dict_aoi: list = self.aoi.to_dict(orient="records")
 
         for aoi_element in tqdm(dict_aoi, desc="Downloading from PC..."):
-
             # Create path to later check for file existence
             path_to_save = os.path.join(
                 self.save_path, f"{aoi_element['Event_ID']}.nc4"
@@ -168,7 +167,6 @@ class Landsat:
                     )
 
                     if len(items_aoi) > 0:
-
                         data = stackstac.stack(
                             items_aoi,
                             bounds=aoi_element["geometry"].bounds,
@@ -210,6 +208,5 @@ class Landsat:
                 except ValueError as e:
                     print(f"{aoi_element['Event_ID']} failed with: {e}")
                     pass
-
 
         return None

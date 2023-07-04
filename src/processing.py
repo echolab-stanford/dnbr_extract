@@ -17,6 +17,7 @@ from rasterio.plot import show
 import rioxarray as rxr
 from sklearn.preprocessing import MaxAbsScaler
 
+
 def get_dimensions(n):
     """Get optimal dimensions for grid if not prime
 
@@ -73,7 +74,6 @@ def calculate_nbr(path, landsat_sat="LANDSAT_8"):
             raise ValueError("Something is weird in here!")
 
         if nan_coverage < 0.5:
-
             # Take it to a list
             list_bands = np.split(data, data.shape[0], axis=0)
             bands_dict = {k: v.squeeze() for k, v in zip(bands, list_bands)}
@@ -175,7 +175,6 @@ def process_nbr(aoi_df, path_to_files, save_path, aoi_id="Event_ID"):
         grouped_df, total=aoi_df[aoi_id].unique().shape[0], desc="Apply NBR to each AOI"
     ):
         for idx, row in df.iterrows():
-
             try:
                 # Build path to raw landsat file
                 date_format = row["DATE_ACQUIRED"].strftime("%Y_%m_%d")
@@ -210,8 +209,7 @@ def process_nbr(aoi_df, path_to_files, save_path, aoi_id="Event_ID"):
 
 
 def extract_data(path):
-    """ Extract data fast on different scenes using coordinates
-    """
+    """Extract data fast on different scenes using coordinates"""
 
     with rasterio.open(path) as src:
         data_array = src.read(1)
@@ -219,7 +217,6 @@ def extract_data(path):
         mean_data = np.nanmean(data_array)
 
         if not np.isnan(mean_data):
-
             # Clean arrays with bad divisions
             data_array[data_array == np.inf] = np.nan
             data_array[data_array == -np.inf] = np.nan
@@ -235,12 +232,12 @@ def extract_data(path):
             cols, rows = np.meshgrid(np.arange(width), np.arange(height))
             xs, ys = rasterio.transform.xy(src.transform, rows, cols)
 
-            lons= np.array(xs)
+            lons = np.array(xs)
             lats = np.array(ys)
 
             # Subset all coordinates without data and create tuples
             # for coordinates
-            array_coords =  np.vstack(([lats.T], [lons.T])).T
+            array_coords = np.vstack(([lats.T], [lons.T])).T
 
             # Subset only coordinates with data
             data_coords = array_coords[~np.isnan(data_array_nona)]
@@ -249,9 +246,9 @@ def extract_data(path):
             # Save as dataframe
             test_df = pd.DataFrame(
                 {
-                    'lat': data_coords[:,0],
-                    'lon': data_coords[:,1],
-                    'data': no_miss_data
+                    "lat": data_coords[:, 0],
+                    "lon": data_coords[:, 1],
+                    "data": no_miss_data,
                 }
             )
 

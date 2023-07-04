@@ -176,7 +176,6 @@ class GetMODIS:
         wait=wait_fixed(60 * 5) + wait_random(0, 60 * 5), stop=stop_after_attempt(10)
     )
     def get_order_status(self):
-
         # send each order id individually in order to get status
         order_status = {str(idx): "" for idx in list(self.api_df["order_id"].unique())}
         for order_id in order_status.keys():
@@ -244,7 +243,6 @@ class GetMODIS:
             ]
 
     def get_image_data(self):
-
         headers = {"Authorization": f"Bearer {os.environ['MODIS_TOKEN']}"}
         headers.update(self.headers)
 
@@ -261,7 +259,6 @@ class GetMODIS:
                 file.write(r.content)
 
     def delete_all_orders(self):
-
         # get all orders for user
         params = {"email": os.environ["MODIS_EMAIL"]}
         self.base_url_creation(endpoint="getAllOrders", params=params)
@@ -282,7 +279,6 @@ class GetMODIS:
             self.release_codes[oid] = release_code[0]
 
     def download_modis_data(self, start_date, end_date):
-
         # find the unique ids for the time and geography needed
         self.create_image_search_urls(start_date, end_date)
         self.get_image_ids_for_urls()

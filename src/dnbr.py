@@ -8,15 +8,14 @@ from dask.diagnostics import ProgressBar
 
 
 def apply_bitmask(arr) -> xr.DataArray:
-    """Apply QA pixel bit mask for each array depending on platform
-    """
+    """Apply QA pixel bit mask for each array depending on platform"""
 
     unique_platform = np.unique(arr.platform.to_numpy())
 
-    if ['landsat-8', 'landsat-9'] in unique_platform:
-            mask_bitfields = [1, 2, 3, 4]  # dilated cloud, cirrus, cloud, cloud shadow
-    elif ['landsat-4', 'landsat-5', 'landsat-7'] in unique_platform:
-            mask_bitfields = [1, 3, 4, 5]  # dilated cloud, cirrus, cloud, cloud shadow
+    if ["landsat-8", "landsat-9"] in unique_platform:
+        mask_bitfields = [1, 2, 3, 4]  # dilated cloud, cirrus, cloud, cloud shadow
+    elif ["landsat-4", "landsat-5", "landsat-7"] in unique_platform:
+        mask_bitfields = [1, 3, 4, 5]  # dilated cloud, cirrus, cloud, cloud shadow
     else:
         raise ValueError(f"No bit mask defined for {arr.platform.to_numpy()}")
 
@@ -95,9 +94,11 @@ def calculate_dnbr(
     # Apply QA bitmask
     if apply_qa_bitmask:
         try:
-            data = data.groupby('platform').map(apply_bitmask)
+            data = data.groupby("platform").map(apply_bitmask)
         except TypeError or IndexError as e:
-            print(f"Exception: {e}. Maybe platform length is zero: {data.platform.values}")
+            print(
+                f"Exception: {e}. Maybe platform length is zero: {data.platform.values}"
+            )
             data = apply_bitmask(data)
 
     # Calculate NBR manually using the normal formula
@@ -111,24 +112,27 @@ def calculate_dnbr(
     shape_x = data.x.values.shape[0]
     shape_y = data.y.values.shape[0]
     total_px = shape_x * shape_y
-    
+
     try:
         dict_nans = {
-                label: np.count_nonzero(np.isnan(arr.data)).compute() / total_px
-                for label, arr in nbr_manual.groupby("time")
-                }
+            label: np.count_nonzero(np.isnan(arr.data)).compute() / total_px
+            for label, arr in nbr_manual.groupby("time")
+        }
         nbr_manual = nbr_manual.sel(
-                time=[times for times, ratio in dict_nans.items() if
-                      ratio < bad_pixel_tresh]
-                )
+            time=[
+                times for times, ratio in dict_nans.items() if ratio < bad_pixel_tresh
+            ]
+        )
     except TypeError as e:
         print(f"{e}: Maybe time after QA is on len 1: {nbr_manual.time.values}")
 
     # Check that ignition date is within data collection time. It can happen
     # that the ignition date os out of scope (index), especially for early
     # fires in Landsat 4-5.
-    if not ((nbr_manual.time.min() < date_comparison.to_numpy()) &
-            (nbr_manual.time.max() > date_comparison.to_numpy())):
+    if not (
+        (nbr_manual.time.min() < date_comparison.to_numpy())
+        & (nbr_manual.time.max() > date_comparison.to_numpy())
+    ):
         raise IndexError(f"Ignition date: {date_comparison} is not within the range!")
     # Calculate dNBR for all the combination of dates after cleaning the dates. We will
     # filter only dates that make sense:
@@ -153,9 +157,11 @@ def calculate_dnbr(
     combos.sort(key=sort_func)
     if optimal_distance:
         # Select min time combination from the sorted list
-        min_combo = [combo for combo in combos if
-                     (pd.to_datetime(combo[1]) -
-                      pd.to_datetime(combo[0])).days > 60]
+        min_combo = [
+            combo
+            for combo in combos
+            if (pd.to_datetime(combo[1]) - pd.to_datetime(combo[0])).days > 60
+        ]
         combos = [min_combo[0]]
 
     # Calculate dNBR for all the combinations above and add a date combination

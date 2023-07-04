@@ -34,17 +34,18 @@ class BAERData:
     """
 
     def __init__(self, save_data_path, years, pattern) -> None:
-
         self.save_data_path: str = save_data_path
         self.pattern: str = pattern
 
         # Take case when year is singleton
         if isinstance(years, int):
-            self.years : list = list(years)
+            self.years: list = list(years)
         else:
             self.years: list = years
 
-        self.base_url: str = "https://burnseverity.cr.usgs.gov/baer/api/form/baer-downloads"
+        self.base_url: str = (
+            "https://burnseverity.cr.usgs.gov/baer/api/form/baer-downloads"
+        )
         self.headers: dict = {"accept": "*/*", "accept-encoding": "gzip;deflate"}
 
     def unzip_filter(self, response, pattern=None) -> None:
@@ -81,7 +82,6 @@ class BAERData:
                 pass
 
         elif response.url.__contains__(".tar"):
-
             # Capture tar/tar.gz mode
             if response.url.endswith("*.gz"):
                 enc: str = "r|gz"
@@ -165,7 +165,9 @@ class BAERData:
         data_list_items = json_string["data"]["items"]
 
         region_items = []
-        for region in tqdm(data_list_items, desc=f"BAER - Getting metadata [{self.years}]"):
+        for region in tqdm(
+            data_list_items, desc=f"BAER - Getting metadata [{self.years}]"
+        ):
             region_df = pd.DataFrame(region["items"])
             region_items.append(region_df)
 
