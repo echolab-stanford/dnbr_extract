@@ -1,3 +1,5 @@
+import os
+import rioxarray
 import numpy as np
 import xarray as xr
 import pandas as pd
@@ -31,65 +33,22 @@ def apply_bitmask(arr) -> xr.DataArray:
     return arr
 
 
-def calculate_dnbr(
-    array_data,
-    date_comparison,
-    bad_pixel_tresh=0.1,
-    optimal_distance=False,
-    apply_qa_bitmask=True,
-) -> xr.DataArray:
-    """Calculate dNBR for a specific even across time
+def calculate_nbr(data,
+                  apply_qa_bitmask):
+    """ Calculate NBR in xarray DataArray
 
-    This function takes an array file and calculates the dNBR across
-    all possible time combinations. If the user specifies it, it can
-    select the best date combination by using two simple filters:
-        1. Closeness to date_comparison
-        2. Proportion of bad pixels in image.
-
-    With a comparison date the dnbr will be calculated for all combinations of
-    dates in the following range:
-
-        <-------------------------------------------------------------->
-         (t - n)             (t = 0: date_comparison)              (t + n)
-
-    The function will return a xarray object indexed by time combination as a
-    string, and by x and y (coordinates). If the qa_pixel is applied, then the
-    returned object will use the pixel threshold.
+    Calculate the Normalized Burn Ratio for a DataArray with Landsat data. This
+    function uses the NBR standard formula: (NIR-SWIR)/(NIR+SWIR). 
 
     Args:
-        - array_data str: A path to a NetCDF file with the landsat array data
-        - date_comparison pd.Timestamp: A date to set the comparison.
-        - bad_pixel_tresh flat: If time-array exceeds this proportion of bad
-          pixels then drop it! Default is 10%, meaning that if more than 10% of
-          the image is full of bad pixels, then it wont be considered for the
-          dnbr calculation.
-        - optimal_distance bool: If True, then only the optimal distance between
-          timestamps will be returned. If False all the possible combinations
-          will be returned. The more dates in the array_data, the larger the
-          number of combinations.
-        - apply_qa_bitmask bool: If True, the Landsat qa_pixel mask is applied
-          and the pixels with bad data will be dropped!
+        - data (xr.DataArray): A data array with the "nir08" and the "swir16"
+          bands.
+        - apply_qa_bitmask (bool): If `True`, it will apply the QA mask to
+          remove all the bad pixels using the `qa_pixel` band.
 
     Returns:
         xr.DataArray
-
     """
-    # Keep this format for all dates
-    format_date = "%Y-%m-%d"
-
-    data = xr.open_mfdataset(array_data)
-
-    # Transform to array without using the to.array() method
-    var_name = list(data.data_vars.keys())
-
-    if len(var_name) == 1:
-        var_name_str = var_name[0]
-    else:
-        warnings.warn(f"Data has {len(var_name)} variables. Selecting first")
-        var_name_str = var_name[0]
-
-    # Subset data to array
-    data = data[var_name_str]
 
     # Apply QA bitmask
     if apply_qa_bitmask:
@@ -106,86 +65,123 @@ def calculate_dnbr(
         data.sel(band="nir08").squeeze() - data.sel(band="swir16").squeeze()
     ) / (data.sel(band="nir08").squeeze() + data.sel(band="swir16").squeeze())
 
-    # Filter by the ratio of missing data after QA. If the NA ratio over the total
-    # of pixels is higher than the bad_pixel_trehs, then the image is dropped from
-    # the stack.
-    shape_x = data.x.values.shape[0]
-    shape_y = data.y.values.shape[0]
-    total_px = shape_x * shape_y
+    return nbr_manual
 
-    try:
-        dict_nans = {
-            label: np.count_nonzero(np.isnan(arr.data)).compute() / total_px
-            for label, arr in nbr_manual.groupby("time")
-        }
-        nbr_manual = nbr_manual.sel(
-            time=[
-                times for times, ratio in dict_nans.items() if ratio < bad_pixel_tresh
-            ]
-        )
-    except TypeError as e:
-        print(f"{e}: Maybe time after QA is on len 1: {nbr_manual.time.values}")
 
-    # Check that ignition date is within data collection time. It can happen
-    # that the ignition date os out of scope (index), especially for early
-    # fires in Landsat 4-5.
-    if not (
-        (nbr_manual.time.min() < date_comparison.to_numpy())
-        & (nbr_manual.time.max() > date_comparison.to_numpy())
-    ):
-        raise IndexError(f"Ignition date: {date_comparison} is not within the range!")
-    # Calculate dNBR for all the combination of dates after cleaning the dates. We will
-    # filter only dates that make sense:
-    # 1. Start date is before comparison date
-    # 2. End date is after the comparison date
-    # 3. The start date is before the end date
+def calculate_dnbr(
+    pre_array,
+    post_array,
+    geometry,
+    buffer_offset_size=180,
+    apply_qa_bitmask=True,
+    event_id = None
+) -> xr.DataArray:
+    """Calculate dNBR for a specific even across timeline
 
-    combos = [
-        l
-        for l in list(combinations(nbr_manual.time.to_numpy(), 2))
-        if (l[0] < l[1])
-        and (l[0] < pd.to_datetime(date_comparison))
-        and (l[1] > pd.to_datetime(date_comparison))
-    ]
+    Following Parks (2019), we calculate the dNBR using two sets of images: one
+    pre- and post-event. We calculate the NBR using the mean composite of both
+    sets and then subtract the pre values from the post period. Since we want to
+    compare events, we calculate an offset using the buffer. Then our dNBR for
+    each pixel is:
 
-    def sort_func(x):
-        start, end = x
-        start_pd, end_pd = pd.to_datetime(start), pd.to_datetime(end)
+        \[
+        \DeltaNBR_{i} = NBR_{i, t=1} - NBR_{i, t=0} - NBR_{offset} 
+        \]
 
-        return (end_pd - start_pd).days
+    Args:
+        - pre_array (str): path to pre-array path for the event. If event_id is
+          passed, then only the root path will be used. 
+        - post_array (str): path to post-array for the same event. If event_id
+          is passed, then only the root path will be used
+        - geometry (gpd.GeoDataFrame): Spatial dataframe object with event data.
+          The function expect that event_id is identical. 
+        - buffer_offset_size (int): Buffer distance to build offset value. If
+          None, then no offset will be calculated. 
+        - apply_qa_bitmask (bool): If `True` apply the bitmask and remove all
+          bad pixels following the QA flags
+        - event_id (str): Event ID to find images in pre and post imagery paths
+          and in geometry.
 
-    combos.sort(key=sort_func)
-    if optimal_distance:
-        # Select min time combination from the sorted list
-        min_combo = [
-            combo
-            for combo in combos
-            if (pd.to_datetime(combo[1]) - pd.to_datetime(combo[0])).days > 60
-        ]
-        combos = [min_combo[0]]
+    Returns:
+        xr.DataArray
+    """
 
-    # Calculate dNBR for all the combinations above and add a date combination
-    # coordinate. Then concatenate this. Depending on the filters used before
-    # the number of dates can be very high.
-    dnbrs = []
-    for idx, dates in enumerate(combos):
-        start_date, end_date = dates
-        dnbr = (
-            nbr_manual.sel(time=start_date) - nbr_manual.sel(time=end_date)
-        ).squeeze()
+    # Keep this format for all dates
+    format_date = "%Y-%m-%d"
 
-        # Format date
-        start_date_str = pd.to_datetime(start_date).strftime(format_date)
-        end_date_str = pd.to_datetime(end_date).strftime(format_date)
+    # Build paths
+    if event_id is not None: 
+        pre_array_path = os.path.join(pre_array, f"{event_id}.nc4")
+        post_array_path = os.path.join(post_array, f"{event_id}.nc4")
+    else: 
+        pre_array_path, post_array_path = (pre_array, post_array)
+    
+    # Open datasets and calculate mean
+    pre_data = (
+            xr.open_mfdataset(pre_array_path)
+            .mean(dim="time")
+            .rio.write_crs("4326")
+            .to_array()
+            .squeeze()
+            )
+    # Notice that we use interp here to account to possible differences in the
+    # coordinates within pre and post. This is similar to a bilinear
+    # interpolation where 
+    post_data = (
+            xr.open_mfdataset(post_array_path)
+            .mean(dim="time")
+            .rio.write_crs("4326")
+            .to_array()
+            .squeeze()
+            .interp_like(pre_data, method="linear")
+            )
+    
+    # Calculate offset
+    if buffer_offset_size is not None:
+        # Check projection
+        if not geometry.crs.is_projected:
+            raise TypeError(f"{geometry.crs} no good for these calculations")
 
-        dnbr = dnbr.expand_dims(
-            {
-                "date_combination": [f"{start_date_str}/{end_date_str}"],
-            }
-        )
-        dnbrs.append(dnbr)
+        try:
+            geom_event = geometry[geometry.Event_ID == event_id]
+            buffer = geom_event.buffer(buffer_offset_size)
+            
+            # Calculate difference and project back to lat/lon
+            offset = buffer.difference(geom_event)
+            offset_planar = offset.to_crs(4326).geometry.values
 
-    with ProgressBar():
-        dnbr = xr.concat(dnbrs, dim="date_combination")
+        except KeyError as e:
+            print(f"Exception {e}: Cannot find event id columnd maybe? {geometry.columns}")
+            
+        # Caclulate off-set in data
+        pre_data_ring = pre_data.rio.clip(offset_planar, 
+                                          crs=4326,
+                                          drop=False, 
+                                          invert=False) 
+        post_data_ring = post_data.rio.clip(offset_planar, 
+                                           crs=4326,
+                                           drop=False, 
+                                           invert=False)
+
+        # Calculate NBR
+        pre_nbr_ring = calculate_nbr(pre_data_ring, 
+                                apply_qa_bitmask)
+        
+        post_nbr_ring = calculate_nbr(post_data_ring, 
+                                 apply_qa_bitmask)
+
+        dnbr_ring = (pre_nbr_ring - post_nbr_ring).mean().squeeze()
+
+    else:
+        dnbr_ring = 0
+
+    # Calculate NBR for both periods
+    pre_nbr = calculate_nbr(pre_data, 
+                            apply_qa_bitmask)
+    post_nbr = calculate_nbr(post_data, 
+                             apply_qa_bitmask)
+
+    # Calculate dNBR for all the pixels
+    dnbr = (pre_nbr - post_nbr) - dnbr_ring
 
     return dnbr
