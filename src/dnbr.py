@@ -1,4 +1,6 @@
+import pdb
 import os
+import dask
 import rioxarray
 import numpy as np
 import xarray as xr
@@ -9,7 +11,7 @@ from itertools import combinations
 from dask.diagnostics import ProgressBar
 
 
-def apply_bitmask(arr) -> xr.DataArray:
+def apply_bitmask(arr) -> xr.DataArray or np.array:
     """Apply QA pixel bit mask for each array depending on platform"""
 
     unique_platform = np.unique(arr.platform.to_numpy())
@@ -32,9 +34,8 @@ def apply_bitmask(arr) -> xr.DataArray:
 
     return arr
 
-
-def calculate_nbr(data,
-                  apply_qa_bitmask):
+@dask.delayed
+def calculate_nbr(data):
     """ Calculate NBR in xarray DataArray
 
     Calculate the Normalized Burn Ratio for a DataArray with Landsat data. This
@@ -43,22 +44,10 @@ def calculate_nbr(data,
     Args:
         - data (xr.DataArray): A data array with the "nir08" and the "swir16"
           bands.
-        - apply_qa_bitmask (bool): If `True`, it will apply the QA mask to
-          remove all the bad pixels using the `qa_pixel` band.
 
     Returns:
         xr.DataArray
     """
-
-    # Apply QA bitmask
-    if apply_qa_bitmask:
-        try:
-            data = data.groupby("platform").map(apply_bitmask)
-        except TypeError or IndexError as e:
-            print(
-                f"Exception: {e}. Maybe platform length is zero: {data.platform.values}"
-            )
-            data = apply_bitmask(data)
 
     # Calculate NBR manually using the normal formula
     nbr_manual = (
@@ -67,14 +56,43 @@ def calculate_nbr(data,
 
     return nbr_manual
 
+@dask.delayed
+def apply_bit_mask_group(arr):
+    """ Apply QA mask to array across different platforms
 
+    Apply the QA mask on xarray object using the platform variable. If the
+    coordinate is not available, then an error will be raised! If the platform
+    value is unique, then is only applied to the unique platform.
+
+    Args:
+        - arr (xr.Dataset or xr.DataArray)
+
+    Returns:
+        xr.Dataset or xr.DataArray
+    """
+
+    # Apply QA bitmask
+    try:
+        arr = arr.groupby("platform").map(apply_bitmask)
+    except TypeError or IndexError as e:
+        print(
+            f"Exception: {e}. Maybe platform length is zero: {arr.platform.values}"
+        )
+        arr = apply_bitmask(arr)
+
+    except KeyError:
+        pdb.set_trace()
+
+    return arr
+ 
 def calculate_dnbr(
     pre_array,
     post_array,
     geometry,
     buffer_offset_size=180,
     apply_qa_bitmask=True,
-    event_id = None
+    event_id = None,
+    save = None
 ) -> xr.DataArray:
     """Calculate dNBR for a specific even across timeline
 
@@ -101,6 +119,8 @@ def calculate_dnbr(
           bad pixels following the QA flags
         - event_id (str): Event ID to find images in pre and post imagery paths
           and in geometry.
+        - save (str): A path to save the restulting array. If `None`, then it
+          won't save it. 
 
     Returns:
         xr.DataArray
@@ -115,10 +135,18 @@ def calculate_dnbr(
         post_array_path = os.path.join(post_array, f"{event_id}.nc4")
     else: 
         pre_array_path, post_array_path = (pre_array, post_array)
-    
+
+    # Open files and prepare for QA cleaning
+    pre_data = xr.open_mfdataset(pre_array_path)
+    post_data = xr.open_mfdataset(post_array_path)
+
+    if apply_qa_bitmask:
+        pre_data = apply_bit_mask_group(pre_data)
+        post_data = apply_bit_mask_group(post_data)
+
     # Open datasets and calculate mean
     pre_data = (
-            xr.open_mfdataset(pre_array_path)
+            pre_data
             .mean(dim="time")
             .rio.write_crs("4326")
             .to_array()
@@ -128,7 +156,7 @@ def calculate_dnbr(
     # coordinates within pre and post. This is similar to a bilinear
     # interpolation where 
     post_data = (
-            xr.open_mfdataset(post_array_path)
+            post_data
             .mean(dim="time")
             .rio.write_crs("4326")
             .to_array()
@@ -164,11 +192,8 @@ def calculate_dnbr(
                                            invert=False)
 
         # Calculate NBR
-        pre_nbr_ring = calculate_nbr(pre_data_ring, 
-                                apply_qa_bitmask)
-        
-        post_nbr_ring = calculate_nbr(post_data_ring, 
-                                 apply_qa_bitmask)
+        pre_nbr_ring = calculate_nbr(pre_data_ring) 
+        post_nbr_ring = calculate_nbr(post_data_ring) 
 
         dnbr_ring = (pre_nbr_ring - post_nbr_ring).mean().squeeze()
 
@@ -176,12 +201,13 @@ def calculate_dnbr(
         dnbr_ring = 0
 
     # Calculate NBR for both periods
-    pre_nbr = calculate_nbr(pre_data, 
-                            apply_qa_bitmask)
-    post_nbr = calculate_nbr(post_data, 
-                             apply_qa_bitmask)
+    pre_nbr = calculate_nbr(pre_data) 
+    post_nbr = calculate_nbr(post_data)
 
     # Calculate dNBR for all the pixels
     dnbr = (pre_nbr - post_nbr) - dnbr_ring
+
+    if save is not None:
+        dnbr.rio.to_raster(save, tiled=True, windowed=True)
 
     return dnbr
