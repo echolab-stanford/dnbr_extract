@@ -5,6 +5,7 @@ import shutil
 from urllib.parse import urlparse
 import warnings
 
+from datetime import datetime
 from rasterio.enums import Resampling
 import dask.dataframe as dd
 import geopandas as gpd
@@ -12,8 +13,6 @@ import numpy as np
 from osgeo import gdal
 import pandas as pd
 import planetary_computer
-import polars as pl
-import pystac
 import pystac_client
 import requests
 from shapely import geometry
@@ -21,7 +20,7 @@ from tqdm import tqdm
 
 import adlfs
 import stackstac
-from utils import intersection_percent
+from .utils import intersection_percent, num_day_to_datetime
 
 
 class Landsat:
@@ -38,6 +37,7 @@ class Landsat:
         save_path,
         date_window,
         buffer=10000,
+        date_window_type = "delta",
         collection="landsat-c2-l2",
         force_update=False,
     ) -> None:
@@ -47,6 +47,7 @@ class Landsat:
         self.buffer: int = buffer
         self.aoi_date = "Ig_Date"
         self.collection: str = collection
+        self.date_window_type = date_window_type
 
         if not isinstance(date_window, tuple):
             self.date_window: tuple = tuple([date_window, date_window])
@@ -86,11 +87,36 @@ class Landsat:
         aoi[self.aoi_date] = pd.to_datetime(aoi[self.aoi_date])
 
         left, right = self.date_window
+        
+        # Manage date ranges depending on variable type
 
-        aoi = aoi.assign(
-            pre_date=aoi[self.aoi_date] - pd.Timedelta(days=left),
-            post_date=aoi[self.aoi_date] + pd.Timedelta(days=right),
-        )
+        if self.date_window_type == "delta":
+            # Do time range using a time window with the ignition date in the middle
+            aoi = aoi.assign(
+                pre_date=aoi[self.aoi_date] - pd.Timedelta(days=left),
+                post_date=aoi[self.aoi_date] + pd.Timedelta(days=right),
+            )
+        elif self.date_window_type == "pre_year":
+            # Do a time range using left and right! 
+            aoi = aoi.assign(
+                    pre_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(left, x - 1)),
+                    post_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(right, x - 1))
+            )
+
+        elif self.date_window_type == "range_ignition":
+            aoi = aoi.assign(
+                    pre_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(left, x)),
+                    post_date=aoi[self.aoi_date]
+            )
+            # Remove all fires out of the fire season range
+            aoi = aoi[aoi.pre_date <= aoi.Ig_Date]
+
+        elif self.date_window_type == "post_year":
+            # Do a time range using left and right but for the next year 
+            aoi = aoi.assign(
+                    pre_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(left, x + 1)),
+                    post_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(right, x + 1))
+            )
 
         return aoi
 
