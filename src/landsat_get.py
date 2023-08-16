@@ -37,7 +37,7 @@ class Landsat:
         save_path,
         date_window,
         buffer=10000,
-        date_window_type = "delta",
+        date_window_type="delta",
         collection="landsat-c2-l2",
         force_update=False,
     ) -> None:
@@ -87,7 +87,7 @@ class Landsat:
         aoi[self.aoi_date] = pd.to_datetime(aoi[self.aoi_date])
 
         left, right = self.date_window
-        
+
         # Manage date ranges depending on variable type
 
         if self.date_window_type == "delta":
@@ -97,25 +97,35 @@ class Landsat:
                 post_date=aoi[self.aoi_date] + pd.Timedelta(days=right),
             )
         elif self.date_window_type == "pre_year":
-            # Do a time range using left and right! 
+            # Do a time range using left and right!
             aoi = aoi.assign(
-                    pre_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(left, x - 1)),
-                    post_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(right, x - 1))
+                pre_date=aoi[self.aoi_date].dt.year.apply(
+                    lambda x: num_day_to_datetime(left, x - 1)
+                ),
+                post_date=aoi[self.aoi_date].dt.year.apply(
+                    lambda x: num_day_to_datetime(right, x - 1)
+                ),
             )
 
         elif self.date_window_type == "range_ignition":
             aoi = aoi.assign(
-                    pre_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(left, x)),
-                    post_date=aoi[self.aoi_date]
+                pre_date=aoi[self.aoi_date].dt.year.apply(
+                    lambda x: num_day_to_datetime(left, x)
+                ),
+                post_date=aoi[self.aoi_date],
             )
             # Remove all fires out of the fire season range
             aoi = aoi[aoi.pre_date <= aoi.Ig_Date]
 
         elif self.date_window_type == "post_year":
-            # Do a time range using left and right but for the next year 
+            # Do a time range using left and right but for the next year
             aoi = aoi.assign(
-                    pre_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(left, x + 1)),
-                    post_date=aoi[self.aoi_date].dt.year.apply(lambda x: num_day_to_datetime(right, x + 1))
+                pre_date=aoi[self.aoi_date].dt.year.apply(
+                    lambda x: num_day_to_datetime(left, x + 1)
+                ),
+                post_date=aoi[self.aoi_date].dt.year.apply(
+                    lambda x: num_day_to_datetime(right, x + 1)
+                ),
             )
 
         return aoi
@@ -223,7 +233,7 @@ class Landsat:
                                 "sci:doi",
                                 "classification:bitfields",
                             ],
-                            errors="ignore"
+                            errors="ignore",
                         )
 
                         data.to_netcdf(path_to_save)

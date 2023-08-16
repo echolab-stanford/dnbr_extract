@@ -11,11 +11,12 @@ from shapely.geometry import Point
 from shapely.ops import transform
 from datetime import datetime, date, timedelta
 
+
 def num_day_to_datetime(day_num, year) -> datetime:
-    """ Transformd from day of the year to datetime object
+    """Transformd from day of the year to datetime object
 
     Take a day number and return it as a datetime object for an specific year
-    
+
     Args:
         - day_num (int): An integer representing the day of the year
         - year (int): year for date
@@ -29,6 +30,7 @@ def num_day_to_datetime(day_num, year) -> datetime:
     resolved_time = start_date + timedelta(days=int(day_num) - 1)
 
     return resolved_time
+
 
 def buffer_bounding_box(bounds, buf=10000) -> tuple:
     """Create a buffer around a bounding box object
