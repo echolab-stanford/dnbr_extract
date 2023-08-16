@@ -1,7 +1,7 @@
 # Calculate burning/fire metrics from Landsat 2 Collection
 
 This repo will help you get the  [Differenced Normalized Burn Ratio][1]
-($\Delta$NBR) for a set of fires. The pipeline includes storing Landsat Level-2
+($\Delta NBR$) for a set of fires. The pipeline includes storing Landsat Level-2
 collection data in NetCDF format and using different methods to calculate the
 fire severity indexes from these data. 
 
@@ -46,7 +46,7 @@ options:
                         Calculate dNBR with offset
 ```
 
-The defaults on these functions will follow the [Parks, et.al. (2018)][3] $\Delta$NBR calculation. 
+The defaults on these functions will follow the [Parks, et.al. (2018)][3] $\Delta NBR$ calculation. 
 
 
 
