@@ -57,7 +57,7 @@ def calculate_nbr(data):
     return nbr_manual
 
 @dask.delayed
-def apply_bit_mask_group(arr):
+def apply_bit_mask_group(arr, event):
     """ Apply QA mask to array across different platforms
 
     Apply the QA mask on xarray object using the platform variable. If the
@@ -70,7 +70,8 @@ def apply_bit_mask_group(arr):
     Returns:
         xr.Dataset or xr.DataArray
     """
-
+    
+    print(event)
     # Apply QA bitmask
     try:
         arr = arr.groupby("platform").map(apply_bitmask)
@@ -79,9 +80,6 @@ def apply_bit_mask_group(arr):
             f"Exception: {e}. Maybe platform length is zero: {arr.platform.values}"
         )
         arr = apply_bitmask(arr)
-
-    except KeyError:
-        pdb.set_trace()
 
     return arr
  
@@ -141,8 +139,8 @@ def calculate_dnbr(
     post_data = xr.open_mfdataset(post_array_path)
 
     if apply_qa_bitmask:
-        pre_data = apply_bit_mask_group(pre_data)
-        post_data = apply_bit_mask_group(post_data)
+        pre_data = apply_bit_mask_group(pre_data, event_id)
+        post_data = apply_bit_mask_group(post_data, event_id)
 
     # Open datasets and calculate mean
     pre_data = (
@@ -192,8 +190,8 @@ def calculate_dnbr(
                                            invert=False)
 
         # Calculate NBR
-        pre_nbr_ring = calculate_nbr(pre_data_ring) 
-        post_nbr_ring = calculate_nbr(post_data_ring) 
+        pre_nbr_ring = calculate_nbr(pre_data_ring)
+        post_nbr_ring = calculate_nbr(post_data_ring)
 
         dnbr_ring = (pre_nbr_ring - post_nbr_ring).mean().squeeze()
 
@@ -201,7 +199,7 @@ def calculate_dnbr(
         dnbr_ring = 0
 
     # Calculate NBR for both periods
-    pre_nbr = calculate_nbr(pre_data) 
+    pre_nbr = calculate_nbr(pre_data)
     post_nbr = calculate_nbr(post_data)
 
     # Calculate dNBR for all the pixels

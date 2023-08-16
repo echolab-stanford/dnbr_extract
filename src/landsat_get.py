@@ -203,13 +203,15 @@ class Landsat:
                         )
 
                         data.attrs = {}
-                        data = data.drop(
+                        data = data.drop_vars(
                             [
                                 "instruments",
                                 "raster:bands",
                                 "center_wavelength",
                                 "proj:epsg",
+                                "proj:shape",
                                 "gsd",
+                                "proj:transform",
                                 "landsat:collection_category",
                                 "landsat:collection_number",
                                 "landsat:correction",
@@ -220,7 +222,8 @@ class Landsat:
                                 "landsat:wrs_row",
                                 "sci:doi",
                                 "classification:bitfields",
-                            ]
+                            ],
+                            errors="ignore"
                         )
 
                         data.to_netcdf(path_to_save)
