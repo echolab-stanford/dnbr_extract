@@ -1,3 +1,5 @@
+import pdb
+
 from functools import cached_property
 import gzip
 import os
@@ -17,6 +19,9 @@ import pystac_client
 import requests
 from shapely import geometry
 from tqdm import tqdm
+from requests.adapters import HTTPAdapter
+from pystac_client.stac_api_io import StacApiIO
+from urllib3 import Retry
 
 import adlfs
 import stackstac
@@ -27,7 +32,7 @@ class Landsat:
     """Search and download Landsat imagery
 
     This class searchs and download Landsat scenes corresponding to overlapping
-    geometries and metadata.
+    geometries and metadata and saves it to a NetCDF
     """
 
     def __init__(
@@ -36,7 +41,8 @@ class Landsat:
         cloud_coverage,
         save_path,
         date_window,
-        buffer=10000,
+        filter_coverage=True,
+        epsg=3310,
         date_window_type="delta",
         collection="landsat-c2-l2",
         force_update=False,
@@ -44,8 +50,9 @@ class Landsat:
         self.cloud_coverage: float = cloud_coverage
         self.aoi_path: str = aoi_path
         self.save_path: str = save_path
-        self.buffer: int = buffer
         self.aoi_date = "Ig_Date"
+        self.epsg = epsg
+        self.filter_coverage = filter_coverage
         self.collection: str = collection
         self.date_window_type = date_window_type
 
@@ -55,14 +62,22 @@ class Landsat:
             self.date_window: tuple = date_window
 
         # Subset bands of interest in Landsat collection
-        self.bands: list[str] = ["blue", "green", "red", "nir08", "swir16", "qa_pixel"]
-        self.platform: list[str] = ["landsat-4", "landsat-5", "landsat-8", "landsat-9"]
+        self.bands: list[str] = ["blue", "green", "red", "nir08", "swir22", "qa_pixel"]
+        self.platform: list[str] = ["landsat-4", "landsat-5", "landsat-7", "landsat-8", "landsat-9"]
 
+
+   
     @cached_property
     def catalog(self) -> pystac_client.Client:
+
+        retry = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504], allowed_methods=None)
+        stac_api_io = StacApiIO(max_retries=retry)
+        stac_api_io = StacApiIO(max_retries=retry) 
+        
         catalog = pystac_client.Client.open(
             "https://planetarycomputer.microsoft.com/api/stac/v1/",
             modifier=planetary_computer.sign_inplace,
+            stac_io=stac_api_io
         )
 
         return catalog
@@ -165,21 +180,23 @@ class Landsat:
 
         # Make collection
         items_search = search.get_all_items()
-
         # Filter out all the items that do not cover the geometry 100%. This
         # might not be what we want in all applications (i.e. building a mosaic
         # or a composite), but for now is convenient to do it here.
-        item_aoi_coverage: list[str] = [
-            intersection_percent(item, geometry_obj) for item in items_search.items
-        ]
+        if self.filter_coverage:
+            item_aoi_coverage: list[str] = [
+                intersection_percent(item, geometry_obj) for item in items_search.items
+            ]
 
-        print(item_aoi_coverage)
+            print(item_aoi_coverage)
 
-        filter_items = [
-            item
-            for item, coverage in zip(items_search, item_aoi_coverage)
-            if float(coverage) > 99
-        ]
+            filter_items = [
+                item
+                for item, coverage in zip(items_search, item_aoi_coverage)
+                if float(coverage) > 99
+            ]
+        else:
+            filter_items = items_search
 
         return filter_items
 
@@ -208,7 +225,9 @@ class Landsat:
                             bounds=aoi_element["geometry"].bounds,
                             assets=self.bands,
                             epsg=4326,
-                            resampling=Resampling.bilinear,
+                            rescale=False,
+                            #resolution=30,
+                            #resampling=Resampling.bilinear,
                             snap_bounds=True,
                         )
 
