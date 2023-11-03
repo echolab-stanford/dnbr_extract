@@ -9,7 +9,6 @@ from pathlib import Path
 from src.dnbr import calculate_dnbr
 from dask.distributed import Client
 
-
 @dask.delayed
 def lazy_saving(data, save_path):
     """Lazy array saving using the rio.xarray accessor"""
@@ -62,6 +61,7 @@ def batch_dnbr(
                     geometry=wildfires_meters,
                     buffer_offset_size=buffer_size,
                     apply_qa_bitmask=True,
+                    calibration=False,
                     event_id=raw_event,
                 )
 

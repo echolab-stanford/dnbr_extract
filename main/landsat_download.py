@@ -29,6 +29,10 @@ if __name__ == "__main__":
         (mtbs.Event_ID.str.contains("CA")) & (mtbs.Incid_Type == "Wildfire")
     ]
 
+    # Experiments
+    #list_geoms = ["CA4075212115820020926", "CA3606711840020020721", "CA3850212028020041006", "CA4082612107820040722"]
+    #wildfires = wildfires[wildfires.Event_ID.isin(list_geoms)]
+
     # Create buffers for extraction! remember we need to calculate and offset for each
     # fire
     wildfires_meters = wildfires.to_crs(3310)  # NAD83 for CA
@@ -50,6 +54,7 @@ if __name__ == "__main__":
         aoi_path=wildfire_buffers,
         cloud_coverage=args.cloud_coverage,
         save_path=args.path_to_save,
+        filter_coverage=True,
         date_window=tuple([152, 273]),  # CA fire season period
         date_window_type=type_extract,
     )
