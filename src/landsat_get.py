@@ -12,7 +12,6 @@ from rasterio.enums import Resampling
 import dask.dataframe as dd
 import geopandas as gpd
 import numpy as np
-from osgeo import gdal
 import pandas as pd
 import planetary_computer
 import pystac_client
