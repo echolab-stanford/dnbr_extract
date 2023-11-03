@@ -52,14 +52,14 @@ def calculate_nbr(data):
 
     # Calculate NBR manually using the normal formula
     nbr_manual = (
-        data.sel(band="nir08").squeeze() - data.sel(band="swir16").squeeze()
-    ) / (data.sel(band="nir08").squeeze() + data.sel(band="swir16").squeeze())
+        data.sel(band="nir08").squeeze() - data.sel(band="swir22").squeeze()
+    ) / (data.sel(band="nir08").squeeze() + data.sel(band="swir22").squeeze())
 
     return nbr_manual
 
 
 @dask.delayed
-def apply_bit_mask_group(arr, event):
+def apply_bit_mask_group(arr):
     """Apply QA mask to array across different platforms
 
     Apply the QA mask on xarray object using the platform variable. If the
@@ -73,11 +73,10 @@ def apply_bit_mask_group(arr, event):
         xr.Dataset or xr.DataArray
     """
 
-    print(event)
     # Apply QA bitmask
     try:
         arr = arr.groupby("platform").map(apply_bitmask)
-    except TypeError or IndexError as e:
+    except ValueError as e:
         print(f"Exception: {e}. Maybe platform length is zero: {arr.platform.values}")
         arr = apply_bitmask(arr)
 
@@ -90,6 +89,7 @@ def calculate_dnbr(
     geometry,
     buffer_offset_size=180,
     apply_qa_bitmask=True,
+    calibration=False,
     event_id=None,
     save=None,
 ) -> xr.DataArray:
@@ -140,10 +140,17 @@ def calculate_dnbr(
     post_data = xr.open_mfdataset(post_array_path)
 
     if apply_qa_bitmask:
-        pre_data = apply_bit_mask_group(pre_data, event_id)
-        post_data = apply_bit_mask_group(post_data, event_id)
+        pre_data = apply_bit_mask_group(pre_data)
+        post_data = apply_bit_mask_group(post_data)
 
-    # Open datasets and calculate mean
+    if calibration:
+        # Landsat collection 2 has a calibration number coming from the
+        # atmospheric correction. We are hard coding this calibration 
+        # parameters in here!
+        pre_data = (pre_data * 0.0000275) - 0.2
+        post_data = (post_data * 0.0000275) - 0.2
+
+    #Open datasets and calculate mean
     pre_data = pre_data.mean(dim="time").rio.write_crs("4326").to_array().squeeze()
     # Notice that we use interp here to account to possible differences in the
     # coordinates within pre and post. This is similar to a bilinear
@@ -153,7 +160,7 @@ def calculate_dnbr(
         .rio.write_crs("4326")
         .to_array()
         .squeeze()
-        .interp_like(pre_data, method="linear")
+        .interp_like(pre_data, method="nearest")
     )
 
     # Calculate offset

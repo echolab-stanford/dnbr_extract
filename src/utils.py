@@ -1,11 +1,16 @@
+import os
 from math import sqrt
 from typing import Any, Dict
 
 import geopandas
 import numpy as np
 import pandas as pd
+import geopandas as gpd
+import rasterio
+from rasterio import features
 import pyproj
 import pystac
+from tqdm import tqdm
 from shapely import geometry, wkb
 from shapely.geometry import Point
 from shapely.ops import transform
@@ -86,3 +91,76 @@ def intersection_percent(item: pystac.Item, aoi: Dict[str, Any]) -> float:
     intersection_percent = (intersected_geom.area * 100) / geom_aoi.area
 
     return intersection_percent
+
+def create_fire_rasters(shape,
+                        id,
+                        date_var,
+                        template_path,
+                        save_path_dir="./",
+                        cummulative=False,
+                        out_file_stem="shape_rasterization"
+                       ):
+    """ Create rasterized versions of a shape cumulative (or not) by year
+
+    This function rasterizes a shapefile using rasterio's features.rasterize 
+    function. The shapefile is divided by date (year by default) and a raster
+    is created per each year, but including all the other shapes for years
+    less or equal to the present year. The output will be saved a GeoTIFF 
+    with LZW compression and with an integer as a dtype to save some space.
+
+    Args:
+        - shape (gpd.GeoDataFrame): A data frame with geometric data with dates
+        - id (str): A string variable that identifies each geometry
+        - date_var (str): a string with the name of the data column in the dataset
+        - template_path (str): template for rasterization
+        - cummulative (bool): Should we include all the shapes up to that 
+        date (i.e. cummulative)
+        - save_path_dir (str): Path for saving files
+        - out_file_stem (str): seed for name files
+
+    Returns:
+    --------
+        Saves fies to save_path_dir. Function returns None
+    """
+
+    # Check projection in meters, otherwise transform
+    if shape.crs != 3857:
+        shape = shape.to_crs("EPSG:3857")
+
+    # For each year get all the shapes with a date less or equal to
+    # year.
+    yearly_cum_shapes = []
+    for year in tqdm(shape[date_var].dt.year.unique(), 
+                     desc="Year "):
+
+        if cummulative:
+            shape_year = shape[shape[date_var].dt.year <= year]
+        else:
+            shape_year = shape[shape[date_var].dt.year == year]
+
+        # Densify the segments to have a point every meter
+        boundaries = shape_year.boundary.segmentize(1)
+        data_to_burn = shape_year[id].astype(float).to_list()
+        # Create raster using template
+        with rasterio.open(template_path) as src:
+            meta = src.meta.copy()
+            meta.update({"compress": "lzw", "dtype": np.float64})
+
+            save_path = os.path.join(save_path_dir, f"{out_file_stem}_{year}.tif")
+            
+            with rasterio.open(save_path, 'w+', **meta) as out:
+                out_arr = out.read(1)
+            
+                # this is where we create a generator of geom, value pairs to use in rasterizing
+                shapes = ((geom,value) for geom, value in zip(boundaries, data_to_burn))
+                #shapes = ((geom) for geom in boundaries)
+            
+                burned = features.rasterize(shapes=shapes,
+                                            fill=0,
+                                            out=out_arr,
+                                            default_value=1,
+                                            all_touched=True,
+                                            transform=out.transform)
+                out.write_band(1, burned)
+
+    return None
