@@ -9,6 +9,7 @@ from pathlib import Path
 from src.dnbr import calculate_dnbr
 from dask.distributed import Client
 
+
 @dask.delayed
 def lazy_saving(data, save_path):
     """Lazy array saving using the rio.xarray accessor"""
@@ -19,7 +20,13 @@ def lazy_saving(data, save_path):
 
 
 def batch_dnbr(
-    path_pre, path_post, path_geom, path_save, buffer=True, buffer_size=None
+    path_pre,
+    path_post,
+    path_geom,
+    path_save,
+    buffer=True,
+    buffer_size=None,
+    geom_buffer_size=5000,
 ):
     """Run the whole enchilada."""
 
@@ -59,9 +66,11 @@ def batch_dnbr(
                     pre_array=path_pre,
                     post_array=path_post,
                     geometry=wildfires_meters,
+                    buffer=geom_buffer_size,
                     buffer_offset_size=buffer_size,
                     apply_qa_bitmask=True,
                     calibration=False,
+                    query='`eo:cloud_cover` < 10 and platform.str.endswith("8")',
                     event_id=raw_event,
                 )
 
@@ -102,6 +111,12 @@ if __name__ == "__main__":
         help="Buffer size in meters for offset. Default is 180m",
     )
     parser.add_argument(
+        "--geom_buffer",
+        type=int,
+        default=5000,
+        help="Geom buffer size in meters for offset. Default is 180m",
+    )
+    parser.add_argument(
         "--offset",
         type=bool,
         action=argparse.BooleanOptionalAction,
@@ -118,5 +133,6 @@ if __name__ == "__main__":
         path_save=args.path_to_save,
         buffer=args.offset,
         buffer_size=args.buffer,
+        geom_buffer_size=args.geom_buffer
     )
     client.close()
