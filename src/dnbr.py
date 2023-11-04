@@ -35,7 +35,6 @@ def apply_bitmask(arr) -> xr.DataArray or np.array:
     return arr
 
 
-@dask.delayed
 def calculate_nbr(data):
     """Calculate NBR in xarray DataArray
 
@@ -58,7 +57,6 @@ def calculate_nbr(data):
     return nbr_manual
 
 
-@dask.delayed
 def apply_bit_mask_group(arr):
     """Apply QA mask to array across different platforms
 
@@ -83,13 +81,54 @@ def apply_bit_mask_group(arr):
     return arr
 
 
+def filter_metadata_array(arr, query):
+    """ Filter data array using metadata
+
+    This function filters a xarray object by using metadata values
+
+    Planetary Computer output arrays contain metadata available as non-indexed
+    data coordinates. The variables included are:
+        - landsat:cloud_cover_land
+        - landsat:scene_id
+        - platform
+        - eo:cloud_cover
+        - created
+        - view:sun_azimuth
+        - view:sun_elevation
+    Other variables might be available depending on the type of request to PC.
+    
+    Args:
+        - arr (xr.DataArray or xr.Dataset): array object with PC coordinates.
+          The code will look for ["x", "y", "time", "bands" as indexing bands]
+        - query (str): a string with a query. Just like the pd.DataFrame.query
+          query string
+
+    Returns:
+        xr.DataArray or xr.Dataset
+    """
+
+    # Get only metadata
+    idx = ["time", "x", "y"]
+    not_idx = [coord for coord in  arr.coords if coord not in idx]
+
+    # Apply query
+    df_meta = arr[not_idx].to_dataframe().reset_index().query(query)
+
+    # Subset array selecting only the timestamps that we want
+    arr_meta = arr.sel({"time": df_meta["time"].tolist()})
+
+    return arr_meta
+
+
 def calculate_dnbr(
     pre_array,
     post_array,
     geometry,
+    buffer,
     buffer_offset_size=180,
     apply_qa_bitmask=True,
     calibration=False,
+    query=None,
     event_id=None,
     save=None,
 ) -> xr.DataArray:
@@ -112,6 +151,9 @@ def calculate_dnbr(
           is passed, then only the root path will be used
         - geometry (gpd.GeoDataFrame): Spatial dataframe object with event data.
           The function expect that event_id is identical.
+        - buffer (int): Buffer size to crop the data. This is useful if the
+          image scene is larger than the footprint of the event. The number must
+          be in the geometry crs units.
         - buffer_offset_size (int): Buffer distance to build offset value. If
           None, then no offset will be calculated.
         - apply_qa_bitmask (bool): If `True` apply the bitmask and remove all
@@ -128,6 +170,10 @@ def calculate_dnbr(
     # Keep this format for all dates
     format_date = "%Y-%m-%d"
 
+    # Chunks for dask
+    chunks = {"time": 1, "x": "auto", "y": "auto"}
+    #chunks = {"time": 1}
+    
     # Build paths
     if event_id is not None:
         pre_array_path = os.path.join(pre_array, f"{event_id}.nc4")
@@ -136,8 +182,14 @@ def calculate_dnbr(
         pre_array_path, post_array_path = (pre_array, post_array)
 
     # Open files and prepare for QA cleaning
-    pre_data = xr.open_mfdataset(pre_array_path)
-    post_data = xr.open_mfdataset(post_array_path)
+    pre_data = xr.open_mfdataset(pre_array_path,
+                                 chunks=chunks)
+    post_data = xr.open_mfdataset(post_array_path,
+                                  chunks=chunks)
+    
+    if query is not None:
+        pre_data = filter_metadata_array(pre_data, query=query)
+        post_data = filter_metadata_array(post_data, query=query)
 
     if apply_qa_bitmask:
         pre_data = apply_bit_mask_group(pre_data)
@@ -147,11 +199,32 @@ def calculate_dnbr(
         # Landsat collection 2 has a calibration number coming from the
         # atmospheric correction. We are hard coding this calibration 
         # parameters in here!
-        pre_data = (pre_data * 0.0000275) - 0.2
-        post_data = (post_data * 0.0000275) - 0.2
+        pre_data = (pre_data * 2.75e-5) - 0.2
+        post_data = (post_data * 2.75e-5) - 0.2
 
-    #Open datasets and calculate mean
-    pre_data = pre_data.mean(dim="time").rio.write_crs("4326").to_array().squeeze()
+    #Open datasets, create composite and crop to geometry
+    if not geometry.crs.is_projected:
+        raise ValueError(f"{geometry.crs} units no good to calculate geom buffer")
+
+    try:
+        geom_event_planar = (
+                geometry[geometry["Event_ID"] == event_id]
+                .buffer(buffer)
+                .to_crs(4326)
+        )
+    except KeyError as e:
+        print(f"Exception {e}: Cannot find some column? {geometry.column}")
+    
+    # Now create pre-and post composites with buffered geometry
+    pre_data = (
+            pre_data
+            .mean(dim="time")
+            .rio.write_crs("4326")
+            .to_array()
+            .squeeze()
+            .rio.clip(geom_event_planar)
+            )
+
     # Notice that we use interp here to account to possible differences in the
     # coordinates within pre and post. This is similar to a bilinear
     # interpolation where
@@ -161,6 +234,7 @@ def calculate_dnbr(
         .to_array()
         .squeeze()
         .interp_like(pre_data, method="nearest")
+        .rio.clip(geom_event_planar)
     )
 
     # Calculate offset
